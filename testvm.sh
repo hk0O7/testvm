@@ -15,7 +15,38 @@ indent() {
 	sed -e '/^\s*$/d' -e "s/^/$spacing/"
 }
 
-if [[ "${1-}" =~ ^(--)?((clean(up)?)|(rem(ove)?)|(del(ete)?)|(destroy))$ ]]; then destroy=1; else destroy=0; fi
+if [[ "${1-}" =~ ^(--)?((clean(up)?)|(rem(ove)?)|(del(ete?)?)|(destroy))$ ]]; then destroy=1
+else
+	destroy=0
+	if (($# == 1)); then
+		image_query=$1
+		VM_IMAGE=$(
+			curl https://app.vagrantup.com/boxes/search \
+			  -sLG -d sort=downloads \
+			  --data-urlencode "q=$image_query" |
+			 grep -Em1 '^\s+<img .*alt=".*'"$image_query"'.*" */>$' |
+			 grep -Eo ' alt="[^"]+' |
+			 cut -d'"' -f2
+		) ||:
+		if [[ -z "$VM_IMAGE" ]]; then
+			echo "Failed to find box image matching \`$image_query'." >&2
+			exit 1
+		fi
+		read -p "Found matching box image \`$VM_IMAGE'; provision? [Y/n] "
+		case $REPLY in
+			''|Y|y)
+				echo 'Proceeding...'
+				;;
+			*)
+				echo 'Aborting.'
+				exit 0
+				;;
+		esac
+	elif (($# > 1)); then
+		echo 'Wrong usage (expected one or no arguments).' >&2
+		exit 2
+	fi
+fi
 
 
 # Detect pre-existing testvm's
@@ -75,7 +106,7 @@ if ((destroy)); then
 	fi
 fi
 
-echo "Provisioning new test VM \`$VM_NAME'..."
+echo "Provisioning new test VM \`$VM_NAME' with box image \`$VM_IMAGE'..."
 
 env_dir="$ENV_DIR_PARENT/$VM_NAME"
 
