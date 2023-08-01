@@ -7,6 +7,13 @@ VM_IMAGE='debian/bookworm64'
 ENV_DIR_PARENT="$HOME/.vagrant.d/testvmenv"
 
 
+if (($# > 1)); then
+	echo 'Wrong usage (expected one or no arguments).' >&2
+	exit 2
+elif [[ "${1-}" =~ ^(--)?((clean(up)?)|(rem(ove)?)|(del(ete?)?)|(destroy))$ ]]; then destroy=1
+else destroy=0
+fi
+
 indent() {
 	local l=${1:-1} i
 	for ((i=0;i!=l;i++)); do
@@ -15,41 +22,7 @@ indent() {
 	sed -e '/^\s*$/d' -e "s/^/$spacing/"
 }
 
-if [[ "${1-}" =~ ^(--)?((clean(up)?)|(rem(ove)?)|(del(ete?)?)|(destroy))$ ]]; then destroy=1
-else
-	destroy=0
-	if (($# == 1)); then
-		image_query=$1
-		VM_IMAGE=$(
-			curl https://app.vagrantup.com/boxes/search \
-			  -sLG -d sort=downloads \
-			  --data-urlencode "q=$image_query" |
-			 grep -Em1 '^\s+<img .*alt=".*'"$image_query"'.*" */>$' |
-			 grep -Eo ' alt="[^"]+' |
-			 cut -d'"' -f2
-		) ||:
-		if [[ -z "$VM_IMAGE" ]]; then
-			echo "Failed to find box image matching \`$image_query'." >&2
-			exit 1
-		fi
-		read -p "Found matching box image \`$VM_IMAGE'; provision? [Y/n] "
-		case $REPLY in
-			''|Y|y)
-				echo 'Proceeding...'
-				;;
-			*)
-				echo 'Aborting.'
-				exit 0
-				;;
-		esac
-	elif (($# > 1)); then
-		echo 'Wrong usage (expected one or no arguments).' >&2
-		exit 2
-	fi
-fi
-
-
-# Detect pre-existing testvm's
+# Detect preexisting testvm's
 IFS=$'\n'; if env_dirs=($(ls -1d "$ENV_DIR_PARENT"/"$VM_NAME_PREFIX"* 2>/dev/null)); then
 	if ((destroy)); then
 		for env_dir in ${env_dirs[@]}; do
@@ -106,6 +79,33 @@ if ((destroy)); then
 	fi
 fi
 
+# If query in $1, set $VM_IMAGE to first match in Vagrant Cloud box search results
+if (($# == 1)); then
+	image_query=$1
+	VM_IMAGE=$(
+		curl https://app.vagrantup.com/boxes/search \
+		  -sLG -d sort=downloads \
+		  --data-urlencode "q=$image_query" |
+		 grep -Em1 '^\s+<img .*alt=".*'"$image_query"'.*" */>$' |
+		 grep -Eo ' alt="[^"]+' |
+		 cut -d'"' -f2
+	) ||:
+	if [[ -z "$VM_IMAGE" ]]; then
+		echo "Failed to find box image matching \`$image_query'." >&2
+		exit 1
+	fi
+	read -p "Found matching box image \`$VM_IMAGE'; provision? [Y/n] "
+	case $REPLY in
+		''|Y|y)
+			echo 'Proceeding...'
+			;;
+		*)
+			echo 'Aborting.'
+			exit 0
+			;;
+	esac
+fi
+
 echo "Provisioning new test VM \`$VM_NAME' with box image \`$VM_IMAGE'..."
 
 env_dir="$ENV_DIR_PARENT/$VM_NAME"
@@ -114,18 +114,19 @@ mkdir -vp "$env_dir" 2>&1 | indent
 
 cd "$env_dir"
 
+vagrantfile_extraconf='  config.vm.define "testvm" do |testvm|\n'
+vagrantfile_extraconf+="    testvm.vm.hostname = \"$VM_NAME\"\n"
+vagrantfile_extraconf+='  end\n'
+vagrantfile_extraconf+='  config.vm.synced_folder ".", "/vagrant", disabled: true'
+
 vagrantfile=$(
 	vagrant init --minimal --no-tty "$VM_IMAGE" --output - |
-	 sed 's/^end$/  config.vm.define "testvm" do |testvm|\n    testvm.vm.hostname = "'"$VM_NAME"'"\n  end\nend/'
+	 sed 's%^end$%'"$vagrantfile_extraconf"'\nend%'
 )
 
 echo '    Writing Vagrantfile:'
 echo "$vagrantfile" | indent 2
-
 echo "$vagrantfile" > Vagrantfile
-
-#echo '    Validating Vagrantfile...'
-#vagrant status --no-tty 2>&1 | sed -e 's/^/        /' -e '/^\s*$/d'
 
 echo -e "\n    Running \`vagrant up'..."
 vagrant up --no-tty 2>&1 | indent 2
