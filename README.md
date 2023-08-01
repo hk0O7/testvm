@@ -8,3 +8,6 @@ $ ./testvm.sh  # (provisions a new test VM through Vagrant if none exist, then c
 ```
 $ ./testvm.sh destroy  # (removes any existing test VMs & cleans up Vagrant tmp + box cache)
 ```
+```
+$ ./testvm.sh alpine  # (looks for the most popular Vagrant Cloud box matching 'alpine', provisions and connects to a new test VM with it)
+```
