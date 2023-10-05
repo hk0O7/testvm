@@ -1,16 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 VM_NAME_PREFIX="testvm-"
 VM_NAME="$VM_NAME_PREFIX$(date +%Y%m%d%H%M%S)"
 VM_IMAGE='debian/bookworm64'
 ENV_DIR_PARENT="$HOME/.vagrant.d/testvmenv"
+SSH_TIMEOUT=30
+	# ^ also used as threshold for when SSH returning 255 is not handled anymore
 
 
 if (($# > 1)); then
 	echo 'Wrong usage (expected one or no arguments).' >&2
 	exit 2
-elif [[ "${1-}" =~ ^(--)?((clean(up)?)|(rem(ove)?)|(del(ete?)?)|(destroy))$ ]]; then destroy=1
+elif [[ "${1-}" =~ ^(--)?((clean(up)?)|(rem(ove)?)|(del(ete?)?)|(dlete?)|(destroy))$ ]]; then destroy=1
 else destroy=0
 fi
 
@@ -22,45 +24,95 @@ indent() {
 	sed -e '/^\s*$/d' -e "s/^/$spacing/"
 }
 
+necho() {
+	echo; echo "$@"
+}
+
+vssh() {
+	echo
+	ssh_status=0
+	ssh_start_time=$(date +%s)
+	vagrant ssh testvm -- -o ConnectTimeout=$SSH_TIMEOUT || ssh_status=$?
+	ssh_time=$(($(date +%s) - ssh_start_time))
+}
+
+destroy() {
+	local env_dir="$1"
+	cd "$env_dir"
+	vagrant destroy --no-tty --force testvm 2>&1 | indent || true
+	necho 'Cleaning up...'
+	rm -vr "$env_dir" 2>&1 | indent
+}
+
+offer() {
+	local REPLY
+	local prompt="$1"
+	read -t 0.1 || true
+	necho -n "$prompt [Y/n] "
+	read
+	case $REPLY in
+		''|Y|y) return 0;;
+		*)
+			echo 'Aborting.'
+			exit 0
+			;;
+	esac
+}
+
+offer_destroy() {
+	local env_dir="$1"
+	local prompt='remove?'
+	if [[ $# > 1 ]]; then
+		prompt="$2; $prompt"
+	fi
+	if offer "$prompt"; then
+		necho "Removing test VM \`$VM_NAME'..."
+		destroy "$env_dir"
+	fi
+}
+
+ssh_status_check() {
+	if (( ssh_status == 1 || (ssh_status == 255 && ssh_time <= SSH_TIMEOUT + 2) )); then
+		return 1
+	else return 0
+	fi
+}
+
 # Detect preexisting testvm's
 IFS=$'\n'; if env_dirs=($(ls -1d "$ENV_DIR_PARENT"/"$VM_NAME_PREFIX"* 2>/dev/null)); then
 	if ((destroy)); then
 		for env_dir in ${env_dirs[@]}; do
 			VM_NAME=$(basename "$env_dir")
-			echo "Found test VM \`$VM_NAME'; destroying..."
-			cd "$env_dir"
-			vagrant destroy --no-tty --force 2>&1 | indent || true
-			echo 'Cleaning up...'
-			rm -vr "$env_dir" 2>&1 | indent
+			necho "Found test VM \`$VM_NAME'; destroying..."
+			destroy "$env_dir"
 		done
 	else
 		last_env_dir="${env_dirs[-1]}"
 		VM_NAME=$(basename "$last_env_dir")
-		echo "Found existing test VM \`$VM_NAME'; connecting..."
+		necho "Found existing test VM \`$VM_NAME'; connecting..."
 		cd "$last_env_dir"
-		declare -i ssh_status=0
-		vagrant ssh || ssh_status=$?
-		if [[ $ssh_status == 1 ]]; then
-			echo 'Unsuccesful (1) SSH status; checking test VM status...'
-			declare -i vagrant_status=0
-			vagrant status --no-tty 2>&1 | indent 1 || vagrant_status=${PIPESTATUS[0]}
-			if [[ -n $vagrant_status ]]; then
-				read -t 0.1 || true; read -p "Failed status check on test VM \`$VM_NAME'; remove? [Y/n] "
-				case $REPLY in
-					''|Y|y)
-						echo "Removing test VM \`$VM_NAME'..."
-						vagrant destroy --no-tty --force 2>&1 | indent || true
-						echo 'Cleaning up...'
-						rm -vr "$last_env_dir" 2>&1 | indent
-						exit 0
-						;;
-					*) echo Aborting.; exit 0;;
-				esac
+		vssh
+		if ! ssh_status_check; then
+			necho "Unsuccesful ($ssh_status) SSH status; checking test VM status..."
+			vagrant_status=0
+			vagrant_status_output=$(vagrant status --no-tty testvm 2>&1) || vagrant_status=$?
+			echo "$vagrant_status_output" | indent
+			if ! grep -qE '^testvm\s{2,}((running)|(poweroff)) \([^)]+)$' <<< "$vagrant_status_output"
+			then vagrant_status=1
+			fi
+			if ((vagrant_status)); then
+				offer_destroy "$last_env_dir" "Unexpected status for test VM \`$VM_NAME'"
 			else
-				echo 'Successful status check; attempting power on...'
-				vagrant up 2>&1 | indent
-				echo -e 'Connecting to test VM...\n'
-				vagrant ssh
+				necho -n 'Successful status check; retrying in 10s...'
+				sleep 10; echo
+				vssh
+				if ! ssh_status_check; then
+					offer "SSH status still unsuccessful ($ssh_status); attempt reboot / power on?"
+					necho 'Attempting reboot / power on...'
+					vagrant reload 2>&1 | indent
+					necho 'Connecting to test VM...'
+					vssh
+				fi
 			fi
 		fi
 		exit 0
@@ -68,7 +120,7 @@ IFS=$'\n'; if env_dirs=($(ls -1d "$ENV_DIR_PARENT"/"$VM_NAME_PREFIX"* 2>/dev/nul
 fi
 
 if ((destroy)); then
-	echo "Removing remaining test VM config/data & Vagrant's box/tmp cache..."
+	necho "Removing remaining test VM config/data & Vagrant's box/tmp cache..."
 	rm -vfr ~/.vagrant.d/testvmenv/* ~/.vagrant.d/boxes/* ~/.vagrant.d/tmp/* 2>&1 | indent
 	rm_status=${PIPESTATUS[0]}
 	if ((rm_status)); then
@@ -91,22 +143,13 @@ if (($# == 1)); then
 		 cut -d'"' -f2
 	) ||:
 	if [[ -z "$VM_IMAGE" ]]; then
-		echo "Failed to find box image matching \`$image_query'." >&2
+		necho "Failed to find box image matching \`$image_query'." >&2
 		exit 1
 	fi
-	read -p "Found matching box image \`$VM_IMAGE'; provision? [Y/n] "
-	case $REPLY in
-		''|Y|y)
-			echo 'Proceeding...'
-			;;
-		*)
-			echo 'Aborting.'
-			exit 0
-			;;
-	esac
+	offer "Found matching box image \`$VM_IMAGE'; provision?"
 fi
 
-echo "Provisioning new test VM \`$VM_NAME' with box image \`$VM_IMAGE'..."
+necho "Provisioning new test VM \`$VM_NAME' with box image \`$VM_IMAGE'..."
 
 env_dir="$ENV_DIR_PARENT/$VM_NAME"
 
@@ -124,13 +167,14 @@ vagrantfile=$(
 	 sed 's%^end$%'"$vagrantfile_extraconf"'\nend%'
 )
 
-echo '    Writing Vagrantfile:'
+echo 'Writing Vagrantfile:' | indent
 echo "$vagrantfile" | indent 2
 echo "$vagrantfile" > Vagrantfile
 
-echo -e "\n    Running \`vagrant up'..."
+necho "Running \`vagrant up'..." | indent
 vagrant up --no-tty 2>&1 | indent 2
 
-echo -e '\nConnecting to test VM...\n'
-vagrant ssh
+necho 'Connecting to test VM...'
+vssh
 
+exit 0
