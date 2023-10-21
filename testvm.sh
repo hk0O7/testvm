@@ -78,10 +78,24 @@ ssh_status_check() {
 	fi
 }
 
+progress_bar() {
+	local progress_perc=$1
+	local msg=${2:-}
+	local width_offset=${3:-0}
+	local width_room=$(( ${#msg} + ( (${#msg} > 0) * 1) + 2 + width_offset )) ||:
+	local width=$(( $(tput cols) - width_room )) ||:
+	local done=$((width * progress_perc / 100)) ||:
+	local todo=$((width - done)) ||:
+	printf '\r%*s' $width_offset
+	printf '[%*s' $done | tr ' ' '#'
+	printf '%*s]' $todo | tr ' ' -
+	printf ' %s' "$msg"
+}
+
 # Detect preexisting testvm's
 IFS=$'\n'; if env_dirs=($(ls -1d "$ENV_DIR_PARENT"/"$VM_NAME_PREFIX"* 2>/dev/null)); then
 	if ((destroy)); then
-		for env_dir in ${env_dirs[@]}; do
+		for env_dir in "${env_dirs[@]}"; do
 			VM_NAME=$(basename "$env_dir")
 			necho "Found test VM \`$VM_NAME'; destroying..."
 			destroy "$env_dir"
@@ -172,7 +186,29 @@ echo "$vagrantfile" | indent 2
 echo "$vagrantfile" > Vagrantfile
 
 necho "Running \`vagrant up'..." | indent
-vagrant up --no-tty 2>&1 | indent 2
+vagrant up --machine-readable 2>&1 | while read -r vu_line; do
+	vu_target=$(cut -d, -f2 <<< $vu_line)
+	vu_type=$(cut -d, -f3 <<< $vu_line)
+	if [[ $vu_type == ui ]]; then
+		vu_msg_raw=$(cut -d, -f5- <<< $vu_line)
+		vu_msg=$(sed -e 's/%!(VAGRANT_COMMA)/,/g' -e 's/\\[rn]/\n/g' <<< $vu_msg_raw)
+		if [[ -z $vu_target && $vu_msg =~ ^Progress:\  ]]; then
+			vu_progress_perc=$(cut -d' ' -f2 <<< $vu_msg | tr -d %)
+			vu_progress_msg=$(
+				grep -Po '(?<= \().+(?=\)$)' <<< $vu_msg |
+				 sed -re 's/^Rate: //' -e 's/Estimated time remaining:/ETA:/'
+			)
+			progress_bar $vu_progress_perc "$vu_progress_msg" 12
+		else
+			if [[ -n ${vu_progress_perc:-} ]]; then
+				vu_progress_msg='Done!'$( printf '%*s' $(( ${#vu_progress_msg} - 5 )) )
+				progress_bar 100 "$vu_progress_msg" 12
+				unset vu_progress_perc vu_progress_msg
+			fi
+			echo "$vu_msg" | indent 2
+		fi
+	fi
+done
 
 necho 'Connecting to test VM...'
 vssh
