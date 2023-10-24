@@ -1,5 +1,7 @@
 # testvm.sh
-Quickly deploy/destroy a local Vagrant test VM (requires `vagrant` in `$PATH`).
+Quickly deploy/destroy a local Vagrant test VM (requires `vagrant` in `$PATH`).  
+
+![](showcase.gif)
 
 ## Usage
 ```
