@@ -135,14 +135,13 @@ fi
 
 if ((destroy)); then
 	necho "Removing remaining test VM config/data & Vagrant's box/tmp cache..."
-	rm -vfr ~/.vagrant.d/testvmenv/* ~/.vagrant.d/boxes/* ~/.vagrant.d/tmp/* 2>&1 | indent
-	rm_status=${PIPESTATUS[0]}
-	if ((rm_status)); then
-		exit $rm_status
-	else
-		echo 'Done.' | indent
-		exit 0
-	fi
+	rm -vfr ~/.vagrant.d/testvmenv/* ~/.vagrant.d/tmp/* 2>&1 | indent
+	default_box_name=$(sed 's_/_-VAGRANTSLASH-_g' <<< $VM_IMAGE)
+	IFS=$'\n'; for box in $(ls ~/.vagrant.d/boxes | grep -vFx "$default_box_name" ||:); do
+		rm -vfr ~/.vagrant.d/boxes/"$box"
+	done
+	echo 'Done.' | indent
+	exit 0
 fi
 
 # If query in $1, set $VM_IMAGE to first match in Vagrant Cloud box search results
