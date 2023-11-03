@@ -108,26 +108,33 @@ IFS=$'\n'; if env_dirs=($(ls -1d "$ENV_DIR_PARENT"/"$VM_NAME_PREFIX"* 2>/dev/nul
 		vssh
 		if ! ssh_status_check; then
 			necho "Unsuccesful ($ssh_status) SSH status; checking test VM status..."
-			vagrant_status=0
-			vagrant_status_output=$(vagrant status --no-tty testvm 2>&1) || vagrant_status=$?
-			echo "$vagrant_status_output" | indent
-			if ! grep -qE '^testvm\s{2,}((running)|(poweroff)) \([^)]+)$' <<< "$vagrant_status_output"
-			then vagrant_status=1
-			fi
-			if ((vagrant_status)); then
-				offer_destroy "$last_env_dir" "Unexpected status for test VM \`$VM_NAME'"
-			else
-				necho -n 'Successful status check; retrying in 10s...'
-				sleep 10; echo
-				vssh
-				if ! ssh_status_check; then
-					offer "SSH status still unsuccessful ($ssh_status); attempt reboot / power on?"
-					necho 'Attempting reboot / power on...'
-					vagrant reload 2>&1 | indent
-					necho 'Connecting to test VM...'
+			vagrant_status_output=$(vagrant status --machine-readable testvm 2>&1) ||:
+			{ grep -E '^[0-9]+,testvm,state-human-long' <<< $vagrant_status_output ||:; } |
+			 cut -d, -f4- | sed -e 's/%!(VAGRANT_COMMA)/,/g' -e 's/\\[rn]/\n/g' | indent
+			vm_status=$(grep -Em1 '^[0-9]+,testvm,state,' <<< $vagrant_status_output | cut -d, -f4)
+			case $vm_status in
+				poweroff)
+					necho 'Powering on...'
+					vagrant up 2>&1 | indent
+					;;
+				running)
+					necho -n 'Successful status check; retrying in 10s...'
+					sleep 10; echo
 					vssh
-				fi
-			fi
+					if ! ssh_status_check; then
+						offer "SSH status still unsuccessful ($ssh_status); attempt reboot?"
+						necho 'Attempting reboot...'
+						vagrant reload 2>&1 | indent
+					else exit 0
+					fi
+					;;
+				*)
+					offer_destroy "$last_env_dir" "Unexpected status for test VM \`$VM_NAME'"
+					exit 0
+					;;
+			esac
+			necho 'Connecting to test VM...'
+			vssh
 		fi
 		exit 0
 	fi
@@ -137,7 +144,7 @@ if ((destroy)); then
 	necho "Removing remaining test VM config/data & Vagrant's box/tmp cache..."
 	rm -vfr ~/.vagrant.d/testvmenv/* ~/.vagrant.d/tmp/* 2>&1 | indent
 	default_box_name=$(sed 's_/_-VAGRANTSLASH-_g' <<< $VM_IMAGE)
-	IFS=$'\n'; for box in $(ls ~/.vagrant.d/boxes | grep -vFx "$default_box_name" ||:); do
+	IFS=$'\n'; for box in $(ls ~/.vagrant.d/boxes | grep -vFx "$default_box_name"); do
 		rm -vfr ~/.vagrant.d/boxes/"$box"
 	done
 	echo 'Done.' | indent
