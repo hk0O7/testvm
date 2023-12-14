@@ -62,7 +62,7 @@ offer() {
 offer_destroy() {
 	local env_dir="$1"
 	local prompt='remove?'
-	if [[ $# > 1 ]]; then
+	if (($# > 1)); then
 		prompt="$2; $prompt"
 	fi
 	if offer "$prompt"; then
@@ -111,7 +111,7 @@ IFS=$'\n'; if env_dirs=($(ls -1d "$ENV_DIR_PARENT"/"$VM_NAME_PREFIX"* 2>/dev/nul
 			vagrant_status_output=$(vagrant status --machine-readable testvm 2>&1) ||:
 			{ grep -E '^[0-9]+,testvm,state-human-long' <<< $vagrant_status_output ||:; } |
 			 cut -d, -f4- | sed -e 's/%!(VAGRANT_COMMA)/,/g' -e 's/\\[rn]/\n/g' | indent
-			vm_status=$(grep -Em1 '^[0-9]+,testvm,state,' <<< $vagrant_status_output | cut -d, -f4)
+			vm_status=$(grep -Em1 '^[0-9]+,testvm,state,' <<< $vagrant_status_output | cut -d, -f4) ||:
 			case $vm_status in
 				poweroff)
 					necho 'Powering on...'
