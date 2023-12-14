@@ -1,4 +1,4 @@
-# testvm.sh [![CI shellcheck](https://github.com/hk0O7/testvm/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/hk0O7/testvm/actions/workflows/shellcheck.yml)
+# testvm.sh [![CI shellcheck](https://github.com/hk0O7/testvm/actions/workflows/ci-shellcheck.yml/badge.svg)](https://github.com/hk0O7/testvm/actions/workflows/ci-shellcheck.yml)
 Quickly deploy/destroy a local Vagrant test VM (requires `vagrant` in `$PATH`).  
 
 ![](showcase.gif)

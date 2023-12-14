@@ -11,12 +11,16 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container: debian:latest
     steps:
-      - name: Checkout (copy to runner)
+      - name: '[debug] OS release & user'
+        run: 'cat /etc/os-release; echo -n USER=; whoami'
+      
+      - name: Checkout (copy to runner/container)
         uses: actions/checkout@v4
 
       - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install shellcheck -y
+        run: apt-get update && apt-get install -y shellcheck
 
       - name: Run shellcheck
         run: shellcheck --severity=error *.sh
