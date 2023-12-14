@@ -1,4 +1,4 @@
-name: ShellCheck CI
+name: CI shellcheck
 
 on:
   push:
