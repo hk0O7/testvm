@@ -113,7 +113,7 @@ IFS=$'\n'; if env_dirs=($(ls -1d "$ENV_DIR_PARENT"/"$VM_NAME_PREFIX"* 2>/dev/nul
 			 cut -d, -f4- | sed -e 's/%!(VAGRANT_COMMA)/,/g' -e 's/\\[rn]/\n/g' | indent
 			vm_status=$(grep -Em1 '^[0-9]+,testvm,state,' <<< $vagrant_status_output | cut -d, -f4) ||:
 			case $vm_status in
-				poweroff)
+				poweroff|aborted)
 					necho 'Powering on...'
 					vagrant up 2>&1 | indent
 					;;
